@@ -12,6 +12,7 @@ import decimal, re
 import ctypes
 import sys, struct
 from .pgcollections import OrderedDict
+import math
 from .python2_3 import asUnicode, basestring
 from .Qt import QtGui, QtCore, QT_LIB
 from . import getConfigOption, setConfigOptions
@@ -875,7 +876,8 @@ def transformCoordinates(tr, coords, transpose=False):
     m = m[:, :-1]
     
     ## map coordinates and return
-    mapped = (m*coords).sum(axis=1)  ## apply scale/rotate
+    with np.errstate(invalid='ignore'):
+        mapped = (m*coords).sum(axis=1)  ## apply scale/rotate
     mapped += translate
     
     if transpose:
@@ -933,7 +935,7 @@ def solveBilinearTransform(points1, points2):
     
     return matrix
     
-def rescaleData(data, scale, offset, dtype=None, clip=None):
+def rescaleData(data, scale, maxVal, minVal, dtype=None, clip=None, log=False):
     """Return data rescaled and optionally cast to a new dtype.
 
     The scaling operation is::
@@ -985,8 +987,15 @@ def rescaleData(data, scale, offset, dtype=None, clip=None):
         
         #p = np.poly1d([scale, -offset*scale])
         #d2 = p(data)
-        d2 = data - float(offset)
-        d2 *= scale
+        if not log:
+            rng = maxVal-minVal
+            rng = 1 if rng == 0 else rng
+            d2 = (data - float(minVal)) * scale / (rng)
+        else:
+            rng = math.log10(maxVal)-math.log10(minVal)
+            rng = 1 if rng == 0 else rng
+            with np.errstate(invalid='ignore', divide='ignore'):
+                d2 = (np.log10(data) - np.log10(minVal)) / rng * scale
         
         # Clip before converting dtype to avoid overflow
         if dtype.kind in 'ui':
@@ -1021,7 +1030,7 @@ def makeRGBA(*args, **kwds):
     return makeARGB(*args, **kwds)
 
 
-def makeARGB(data, lut=None, levels=None, scale=None, useRGBA=False): 
+def makeARGB(data, lut=None, levels=None, scale=None, useRGBA=False, log=False):
     """ 
     Convert an array of values into an ARGB array suitable for building QImages,
     OpenGL textures, etc.
@@ -1128,9 +1137,7 @@ def makeARGB(data, lut=None, levels=None, scale=None, useRGBA=False):
                 minVal, maxVal = levels[i]
                 if minVal == maxVal:
                     maxVal = np.nextafter(maxVal, 2*maxVal)
-                rng = maxVal-minVal
-                rng = 1 if rng == 0 else rng
-                newData[...,i] = rescaleData(data[...,i], scale / rng, minVal, dtype=dtype)
+                newData[...,i] = rescaleData(data[...,i], scale, maxVal, minVal, dtype=dtype, log=log)
             data = newData
         else:
             # Apply level scaling unless it would have no effect on the data
@@ -1138,9 +1145,7 @@ def makeARGB(data, lut=None, levels=None, scale=None, useRGBA=False):
             if minVal != 0 or maxVal != scale:
                 if minVal == maxVal:
                     maxVal = np.nextafter(maxVal, 2*maxVal)
-                rng = maxVal-minVal
-                rng = 1 if rng == 0 else rng
-                data = rescaleData(data, scale/rng, minVal, dtype=dtype)
+                data = rescaleData(data, scale, maxVal, minVal, dtype=dtype, log=log)
 
     profile()
     # apply LUT if given

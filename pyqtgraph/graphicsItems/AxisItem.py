@@ -540,14 +540,14 @@ class AxisItem(GraphicsWidget):
             if newRange is None:
                 newRange = view.viewRange()[1]
             if view.yInverted():
-                self.setRange(*newRange[::-1])
+                self.setRange(*(newRange[::-1]))
             else:
                 self.setRange(*newRange)
         else:
             if newRange is None:
                 newRange = view.viewRange()[0]
             if view.xInverted():
-                self.setRange(*newRange[::-1])
+                self.setRange(*(newRange[::-1]))
             else:
                 self.setRange(*newRange)
 
@@ -814,37 +814,38 @@ class AxisItem(GraphicsWidget):
         return strings
 
     def logTickStrings(self, values, scale, spacing):
-        estrings = ["%0.1g"%x for x in 10 ** np.array(values).astype(float) * np.array(scale)]
+        with np.errstate(invalid='ignore', over='ignore'):
+            estrings = ["%0.1g"%x for x in np.power(10, np.array(values).astype(float))]
 
-        if sys.version_info < (3, 0):
-            # python 2 does not support unicode strings like that
-            return estrings
-        else:  # python 3+
-            convdict = {"0": "⁰",
-                        "1": "¹",
-                        "2": "²",
-                        "3": "³",
-                        "4": "⁴",
-                        "5": "⁵",
-                        "6": "⁶",
-                        "7": "⁷",
-                        "8": "⁸",
-                        "9": "⁹",
-                        }
-            dstrings = []
-            for e in estrings:
-                if e.count("e"):
-                    v, p = e.split("e")
-                    sign = "⁻" if p[0] == "-" else ""
-                    pot = "".join([convdict[pp] for pp in p[1:].lstrip("0")])
-                    if v == "1":
-                        v = ""
+            if sys.version_info < (3, 0):
+                # python 2 does not support unicode strings like that
+                return estrings
+            else:  # python 3+
+                convdict = {"0": "⁰",
+                            "1": "¹",
+                            "2": "²",
+                            "3": "³",
+                            "4": "⁴",
+                            "5": "⁵",
+                            "6": "⁶",
+                            "7": "⁷",
+                            "8": "⁸",
+                            "9": "⁹",
+                            }
+                dstrings = []
+                for e in estrings:
+                    if e.count("e"):
+                        v, p = e.split("e")
+                        sign = "⁻" if p[0] == "-" else ""
+                        pot = "".join([convdict[pp] for pp in p[1:].lstrip("0")])
+                        if v == "1":
+                            v = ""
+                        else:
+                            v = v + "·"
+                        dstrings.append(v + "10" + sign + pot)
                     else:
-                        v = v + "·"
-                    dstrings.append(v + "10" + sign + pot)
-                else:
-                    dstrings.append(e)
-            return dstrings
+                        dstrings.append(e)
+                return dstrings
 
     def generateDrawSpecs(self, p):
         """
@@ -897,9 +898,14 @@ class AxisItem(GraphicsWidget):
         if lengthInPixels == 0:
             return
 
+        trueRange = self.range
+        if self.logMode:
+            with np.errstate(invalid='ignore'):
+                trueRange = [x if np.isfinite(x) else 0 for x in np.log10(trueRange)]
+
         # Determine major / minor / subminor axis ticks
         if self._tickLevels is None:
-            tickLevels = self.tickValues(self.range[0], self.range[1], lengthInPixels)
+            tickLevels = self.tickValues(trueRange[0], trueRange[1], lengthInPixels)
             tickStrings = None
         else:
             ## parse self.tickLevels into the formats returned by tickLevels() and tickStrings()
@@ -915,19 +921,19 @@ class AxisItem(GraphicsWidget):
                     strings.append(strn)
 
         ## determine mapping between tick values and local coordinates
-        dif = self.range[1] - self.range[0]
+        dif = trueRange[1] - trueRange[0]
         if dif == 0:
             xScale = 1
             offset = 0
         else:
             if axis == 0:
                 xScale = -bounds.height() / dif
-                offset = self.range[0] * xScale - bounds.height()
+                offset = trueRange[0] * xScale - bounds.height()
             else:
                 xScale = bounds.width() / dif
-                offset = self.range[0] * xScale
+                offset = trueRange[0] * xScale
 
-        xRange = [x * xScale - offset for x in self.range]
+        xRange = [x * xScale - offset for x in trueRange]
         xMin = min(xRange)
         xMax = max(xRange)
 

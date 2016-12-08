@@ -52,23 +52,27 @@ class HistogramLUTItem(GraphicsWidget):
     sigLookupTableChanged = QtCore.Signal(object)
     sigLevelsChanged = QtCore.Signal(object)
     sigLevelChangeFinished = QtCore.Signal(object)
+    sigLogModeChanged = QtCore.Signal(object)
+    sigAutoLevelsChanged = QtCore.Signal(object)
     
     def __init__(self, image=None, fillHistogram=True, rgbHistogram=False, levelMode='mono'):
         GraphicsWidget.__init__(self)
         self.lut = None
+        self.range = None
         self.imageItem = lambda: None  # fake a dead weakref
         self.levelMode = levelMode
         self.rgbHistogram = rgbHistogram
+        self.blockAutoLevelsSignal = False
         
         self.layout = QtGui.QGraphicsGridLayout()
         self.setLayout(self.layout)
         self.layout.setContentsMargins(1,1,1,1)
         self.layout.setSpacing(0)
-        self.vb = ViewBox(parent=self)
+        self.vb = ViewBox(parent=self, invertX=True)
         self.vb.setMaximumWidth(152)
         self.vb.setMinimumWidth(45)
         self.vb.setMouseEnabled(x=False, y=True)
-        self.gradient = GradientEditorItem()
+        self.gradient = GradientEditorItem(histogram=self)
         self.gradient.setOrientation('right')
         self.gradient.loadPreset('grey')
         self.regions = [
@@ -95,12 +99,14 @@ class HistogramLUTItem(GraphicsWidget):
         self.layout.addItem(self.axis, 0, 0)
         self.layout.addItem(self.vb, 0, 1)
         self.layout.addItem(self.gradient, 0, 2)
-        self.range = None
         self.gradient.setFlag(self.gradient.ItemStacksBehindParent)
         self.vb.setFlag(self.gradient.ItemStacksBehindParent)
         
         self.gradient.sigGradientChanged.connect(self.gradientChanged)
+        self.gradient.sigLogModeChanged.connect(self.logModeChanged)
+        self.gradient.sigAutoLevelsChanged.connect(self.autoLevelsChanged)
         self.vb.sigRangeChanged.connect(self.viewRangeChanged)
+        self.vb.sigLogChanged.connect(self.viewLogChanged)
         add = QtGui.QPainter.CompositionMode_Plus
         self.plots = [
             PlotCurveItem(pen=(200, 200, 200, 100)),  # mono
@@ -112,7 +118,6 @@ class HistogramLUTItem(GraphicsWidget):
         
         self.plot = self.plots[0]  # for backward compatibility.
         for plot in self.plots:
-            plot.rotate(90)
             self.vb.addItem(plot)
         
         self.fillHistogram(fillHistogram)
@@ -138,7 +143,7 @@ class HistogramLUTItem(GraphicsWidget):
             return
         
         pen = self.region.lines[0].pen
-        rgn = self.getLevels()
+        rgn = self.region.dataBounds(self.region.orientation)
         p1 = self.vb.mapFromViewToItem(self, Point(self.vb.viewRect().center().x(), rgn[0]))
         p2 = self.vb.mapFromViewToItem(self, Point(self.vb.viewRect().center().x(), rgn[1]))
         gradRect = self.gradient.mapRectToParent(self.gradient.gradRect.rect())
@@ -170,6 +175,14 @@ class HistogramLUTItem(GraphicsWidget):
         
     def viewRangeChanged(self):
         self.update()
+
+    def viewLogChanged(self):
+        x = self.vb.xLog()
+        y = self.vb.yLog()
+        for plot in self.plots:
+            plot.setLogMode(x,y)
+        self.region.setLogMode(y,x)
+        self.axis.setLogMode(y)
     
     def gradientChanged(self):
         if self.imageItem() is not None:
@@ -198,60 +211,22 @@ class HistogramLUTItem(GraphicsWidget):
 
     def regionChanged(self):
         if self.imageItem() is not None:
-            self.imageItem().setLevels(self.getLevels())
+            self.imageItem().setLevels(self.region.getRegion())
         self.sigLevelChangeFinished.emit(self)
+        if not self.blockAutoLevelsSignal:
+            self.gradient.setAutoLevels(False)
 
     def regionChanging(self):
         if self.imageItem() is not None:
-            self.imageItem().setLevels(self.getLevels())
+            self.imageItem().setLevels(self.region.getRegion())
         self.update()
         self.sigLevelsChanged.emit(self)
 
     def imageChanged(self, autoLevel=False, autoRange=False):
-        if self.imageItem() is None:
-            return
-            
-        if self.levelMode == 'mono':
-            for plt in self.plots[1:]:
-                plt.setVisible(False)
-            self.plots[0].setVisible(True)
-            # plot one histogram for all image data
-            profiler = debug.Profiler()
-            h = self.imageItem().getHistogram()
-            profiler('get histogram')
-            if h[0] is None:
-                return
-            self.plot.setData(*h)
-            profiler('set plot')
-            if autoLevel:
-                mn = h[0][0]
-                mx = h[0][-1]
-                self.region.setRegion([mn, mx])
-                profiler('set region')
-            else:
-                mn, mx = self.imageItem().levels
-                self.region.setRegion([mn, mx])
-        else:
-            # plot one histogram for each channel
-            self.plots[0].setVisible(False)
-            ch = self.imageItem().getHistogram(perChannel=True)
-            if ch[0] is None:
-                return
-            for i in range(1, 5):
-                if len(ch) >= i:
-                    h = ch[i-1]
-                    self.plots[i].setVisible(True)
-                    self.plots[i].setData(*h)
-                    if autoLevel:
-                        mn = h[0][0]
-                        mx = h[0][-1]
-                        self.region[i].setRegion([mn, mx])
-                else:
-                    # hide channels not present in image data
-                    self.plots[i].setVisible(False)
-            # make sure we are displaying the correct number of channels
-            self._showRegions()
-            
+        self.updatePlots()
+        if autoLevel or self.autoLevelsEnabled():
+            self.updateAutoLevels()
+
     def getLevels(self):
         """Return the min and max levels.
         
@@ -276,6 +251,7 @@ class HistogramLUTItem(GraphicsWidget):
                 min, max = rgba[0]
             assert None not in (min, max)
             self.region.setRegion((min, max))
+            self.gradient.setAutoLevels(False)
         else:
             if rgba is None:
                 raise TypeError("Must specify rgba argument when levelMode != 'mono'.")
@@ -343,3 +319,101 @@ class HistogramLUTItem(GraphicsWidget):
         self.setLevelMode(state['mode'])
         self.gradient.restoreState(state['gradient'])
         self.setLevels(*state['levels'])
+
+    def autoLevelsChanged(self):
+        self.updateAutoLevels()
+        self.sigAutoLevelsChanged.emit(self)
+
+    def autoLevelsEnabled(self):
+        return self.gradient.autoLevelsEnabled()
+
+    def setAutoLevels(self, value):
+        self.gradient.setAutoLevels(value)
+        if value:
+            self.updateAutoLevels()
+
+    def updatePlots(self):
+        if self.imageItem() is None:
+            return
+
+        if self.levelMode == 'mono':
+            for plt in self.plots[1:]:
+                plt.setVisible(False)
+            self.plots[0].setVisible(True)
+            # plot one histogram for all image data
+            profiler = debug.Profiler()
+            h = self.imageItem().getHistogram(log=self.logModeEnabled())
+            profiler('get histogram')
+            if h[0] is None:
+                return
+            self.plot.setData(*(h[::-1]))
+
+            profiler('set plot')
+        else:
+            # plot one histogram for each channel
+            self.plots[0].setVisible(False)
+            ch = self.imageItem().getHistogram(perChannel=True, log=self.logModeEnabled())
+            if ch[0] is None:
+                return
+            for i in range(1, 5):
+                if len(ch) >= i:
+                    h = ch[i-1]
+                    self.plots[i].setVisible(True)
+                    self.plots[i].setData(*(h[::-1]))
+                else:
+                    # hide channels not present in image data
+                    self.plots[i].setVisible(False)
+            # make sure we are displaying the correct number of channels
+            self._showRegions()
+
+    def quickMinMax(self, data, axis=None):
+        """
+        Estimate the min/max values of *data* by subsampling.
+        Returns [(min, max), ...] with one item per channel
+        """
+        while data.size > 1e6:
+            ax = np.argmax(data.shape)
+            sl = [slice(None)] * data.ndim
+            sl[ax] = slice(None, None, 2)
+            data = data[sl]
+
+        if self.logModeEnabled():
+            data = data[data > 0]
+
+        if axis is None:
+            if data.size == 0:
+                return [(0, 0)]
+            return [(float(np.nanmin(data)), float(np.nanmax(data)))]
+        else:
+            if data.size == 0:
+                return [(0, 0)] * data.shape[-1]
+            return [(float(np.nanmin(data.take(i, axis=axis))),
+                     float(np.nanmax(data.take(i, axis=axis)))) for i in range(data.shape[-1])]
+
+    def autoLevels(self, axis=None):
+        levels = self.quickMinMax(self.imageItem().image)[0]
+        self.setLevels(*levels, rgba=self.quickMinMax(self.imageItem().image, axis))
+
+    def autoRange(self):
+        self.vb.autoRange()
+
+    def updateAutoLevels(self):
+        image = self.imageItem().image
+        if image is None:
+            return
+        profiler = debug.Profiler()
+        self.blockAutoLevelsSignal = True
+        self.region.setRegion(self.quickMinMax(image)[0])
+        self.blockAutoLevelsSignal = False
+        profiler('set region')
+
+    def logModeChanged(self):
+        self.imageItem().setLog(self.gradient.logModeEnabled())
+        self.sigLogModeChanged.emit(self)
+
+    def logModeEnabled(self):
+        return self.gradient.logModeEnabled()
+
+    def setLogMode(self, value):
+        self.imageItem().setLog(value)
+        self.gradient.setLogMode(value)
