@@ -113,8 +113,6 @@ class ImageView(QtGui.QWidget):
             pg.ImageView(view=pg.PlotItem())
         """
         QtGui.QWidget.__init__(self, parent, *args)
-        self.levelMax = 4096
-        self.levelMin = 0
         self.name = name
         self.image = None
         self.axes = {}
@@ -182,7 +180,7 @@ class ImageView(QtGui.QWidget):
             setattr(self, fn, getattr(self.view, fn))
 
         ## wrap functions from histogram
-        for fn in ['setHistogramRange', 'autoHistogramRange', 'getLookupTable', 'getLevels']:
+        for fn in ['setHistogramRange', 'getLookupTable', 'getLevels']:
             setattr(self, fn, getattr(self.ui.histogram, fn))
 
         self.timeLine.sigPositionChanged.connect(self.timeLineChanged)
@@ -306,12 +304,13 @@ class ImageView(QtGui.QWidget):
         profiler()
 
         self.currentIndex = 0
-        self.updateImage(autoHistogramRange=autoHistogramRange)
+        self.updateImage()
         if levels is None and autoLevels:
             self.autoLevels()
         if levels is not None:  ## this does nothing since getProcessedImage sets these values again.
             self.setLevels(*levels)
-            
+        if autoHistogramRange:
+            self.autoHistogramRange()
         if self.ui.roiBtn.isChecked():
             self.roiChanged()
 
@@ -371,8 +370,12 @@ class ImageView(QtGui.QWidget):
             self.playTimer.start(16)
             
     def autoLevels(self):
-        """Set the min/max intensity levels automatically to match the image data."""
-        self.setLevels(self.levelMin, self.levelMax)
+        """Set the levels automatically."""
+        self.ui.histogram.autoLevels()
+
+    def autoHistogramRange(self):
+        """Set the histogram range automatically."""
+        self.ui.histogram.autoRange()
 
     def setLevels(self, min, max):
         """Set the min/max (bright and dark) levels."""
@@ -384,13 +387,10 @@ class ImageView(QtGui.QWidget):
         self.view.autoRange()
         
     def getProcessedImage(self):
-        """Returns the image data after it has been processed by any normalization options in use.
-        This method also sets the attributes self.levelMin and self.levelMax 
-        to indicate the range of data in the image."""
+        """Returns the image data after it has been processed by any normalization options in use."""
         if self.imageDisp is None:
             image = self.normalize(self.image)
             self.imageDisp = image
-            self.levelMin, self.levelMax = list(map(float, self.quickMinMax(self.imageDisp)))
             
         return self.imageDisp
         
@@ -586,17 +586,6 @@ class ImageView(QtGui.QWidget):
                 xvals = (coords**2).sum(axis=0) ** 0.5
                 self.roiCurve.setData(y=data, x=xvals)
 
-    def quickMinMax(self, data):
-        """
-        Estimate the min/max values of *data* by subsampling.
-        """
-        while data.size > 1e6:
-            ax = np.argmax(data.shape)
-            sl = [slice(None)] * data.ndim
-            sl[ax] = slice(None, None, 2)
-            data = data[sl]
-        return nanmin(data), nanmax(data)
-
     def normalize(self, image):
         """
         Process *image* using the normalization options configured in the
@@ -659,15 +648,12 @@ class ImageView(QtGui.QWidget):
         #self.emit(QtCore.SIGNAL('timeChanged'), ind, time)
         self.sigTimeChanged.emit(ind, time)
 
-    def updateImage(self, autoHistogramRange=True):
+    def updateImage(self):
         ## Redraw image on screen
         if self.image is None:
             return
             
         image = self.getProcessedImage()
-        
-        if autoHistogramRange:
-            self.ui.histogram.setHistogramRange(self.levelMin, self.levelMax)
         
         # Transpose image into order expected by ImageItem
         if self.imageItem.axisOrder == 'col-major':

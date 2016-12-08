@@ -1,3 +1,4 @@
+import numpy as np
 from ..Qt import QtGui, QtCore
 from .UIGraphicsItem import UIGraphicsItem
 from .InfiniteLine import InfiniteLine
@@ -53,6 +54,8 @@ class LinearRegionItem(UIGraphicsItem):
         self.blockLineSignal = False
         self.moving = False
         self.mouseHovering = False
+        self.logMode = False
+        self.region = [0, 0]
         
         if orientation == LinearRegionItem.Horizontal:
             self.lines = [
@@ -78,15 +81,22 @@ class LinearRegionItem(UIGraphicsItem):
         self.setMovable(movable)
         
     def getRegion(self):
-        """Return the values at the edges of the region."""
-        #if self.orientation[0] == 'h':
-            #r = (self.bounds.top(), self.bounds.bottom())
-        #else:
-            #r = (self.bounds.left(), self.bounds.right())
-        r = [self.lines[0].value(), self.lines[1].value()]
-        return (min(r), max(r))
+        return [min(self.region), max(self.region)]
+
+    def getRealRegion(self):
+        rng = self.getRegion()
+        if self.logMode:
+            with np.errstate(invalid='ignore', divide='ignore'):
+                rng = np.log10(rng)
+        return rng
 
     def setRegion(self, rgn):
+        self.region = list(rgn)
+        self.updateLines()
+
+    def updateLines(self):
+        rgn = self.getRealRegion()
+
         """Set the values for the edges of the region.
         
         ==============   ==============================================
@@ -97,8 +107,10 @@ class LinearRegionItem(UIGraphicsItem):
         if self.lines[0].value() == rgn[0] and self.lines[1].value() == rgn[1]:
             return
         self.blockLineSignal = True
+        self.lines[0].setVisible(np.isfinite(rgn[0]))
         self.lines[0].setValue(rgn[0])
         self.blockLineSignal = False
+        self.lines[1].setVisible(np.isfinite(rgn[1]))
         self.lines[1].setValue(rgn[1])
         #self.blockLineSignal = False
         self.lineMoved()
@@ -130,7 +142,7 @@ class LinearRegionItem(UIGraphicsItem):
 
     def boundingRect(self):
         br = UIGraphicsItem.boundingRect(self)
-        rng = self.getRegion()
+        rng = self.getRealRegion()
         if self.orientation == LinearRegionItem.Vertical:
             br.setLeft(rng[0])
             br.setRight(rng[1])
@@ -148,13 +160,18 @@ class LinearRegionItem(UIGraphicsItem):
 
     def dataBounds(self, axis, frac=1.0, orthoRange=None):
         if axis == self.orientation:
-            return self.getRegion()
+            return self.getRealRegion()
         else:
             return None
 
     def lineMoved(self):
         if self.blockLineSignal:
             return
+        rgn = [self.lines[0].value(), self.lines[1].value()]
+        if self.logMode:
+            with np.errstate(invalid='ignore', over='ignore'):
+                rgn = np.power(10, rgn)
+        self.region = rgn
         self.prepareGeometryChange()
         #self.emit(QtCore.SIGNAL('regionChanged'), self)
         self.sigRegionChanged.emit(self)
@@ -262,6 +279,14 @@ class LinearRegionItem(UIGraphicsItem):
             self.currentBrush = self.brush
         self.update()
 
+    def setLogMode(self, x, y):
+        if self.orientation == LinearRegionItem.Horizontal:
+            self.logMode = y
+        else:
+            self.logMode = x
+        self.updateLines()
+        self.informViewBoundsChanged()
+
     #def hoverEnterEvent(self, ev):
         #print "rgn hover enter"
         #ev.ignore()
@@ -287,4 +312,6 @@ class LinearRegionItem(UIGraphicsItem):
         #else:
             #self.currentBrush = self.brush
         #self.update()
+
+
 

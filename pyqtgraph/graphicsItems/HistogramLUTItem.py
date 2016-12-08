@@ -35,6 +35,8 @@ class HistogramLUTItem(GraphicsWidget):
     sigLookupTableChanged = QtCore.Signal(object)
     sigLevelsChanged = QtCore.Signal(object)
     sigLevelChangeFinished = QtCore.Signal(object)
+    sigLogModeChanged = QtCore.Signal(object)
+    sigAutoLevelsChanged = QtCore.Signal(object)
     
     def __init__(self, image=None, fillHistogram=True):
         """
@@ -43,6 +45,7 @@ class HistogramLUTItem(GraphicsWidget):
         """
         GraphicsWidget.__init__(self)
         self.lut = None
+        self.range = None
         self.imageItem = lambda: None  # fake a dead weakref
         
         self.layout = QtGui.QGraphicsGridLayout()
@@ -53,17 +56,16 @@ class HistogramLUTItem(GraphicsWidget):
         self.vb.setMaximumWidth(152)
         self.vb.setMinimumWidth(45)
         self.vb.setMouseEnabled(x=False, y=True)
-        self.gradient = GradientEditorItem()
-        self.gradient.setOrientation('right')
-        self.gradient.loadPreset('grey')
         self.region = LinearRegionItem([0, 1], LinearRegionItem.Horizontal)
         self.region.setZValue(1000)
+        self.gradient = GradientEditorItem(histogram=self)
+        self.gradient.setOrientation('right')
+        self.gradient.loadPreset('grey')
         self.vb.addItem(self.region)
         self.axis = AxisItem('left', linkView=self.vb, maxTickLength=-10, parent=self)
         self.layout.addItem(self.axis, 0, 0)
         self.layout.addItem(self.vb, 0, 1)
         self.layout.addItem(self.gradient, 0, 2)
-        self.range = None
         self.gradient.setFlag(self.gradient.ItemStacksBehindParent)
         self.vb.setFlag(self.gradient.ItemStacksBehindParent)
         
@@ -71,9 +73,12 @@ class HistogramLUTItem(GraphicsWidget):
         #self.vb.addItem(self.grid)
         
         self.gradient.sigGradientChanged.connect(self.gradientChanged)
+        self.gradient.sigLogModeChanged.connect(self.logModeChanged)
+        self.gradient.sigAutoLevelsChanged.connect(self.autoLevelsChanged)
         self.region.sigRegionChanged.connect(self.regionChanging)
         self.region.sigRegionChangeFinished.connect(self.regionChanged)
         self.vb.sigRangeChanged.connect(self.viewRangeChanged)
+        self.vb.sigLogChanged.connect(self.viewLogChanged)
         self.plot = PlotDataItem()
         self.plot.rotate(90)
         self.fillHistogram(fillHistogram)
@@ -97,7 +102,7 @@ class HistogramLUTItem(GraphicsWidget):
         
     def paint(self, p, *args):
         pen = self.region.lines[0].pen
-        rgn = self.getLevels()
+        rgn = self.region.dataBounds(self.region.orientation)
         p1 = self.vb.mapFromViewToItem(self, Point(self.vb.viewRect().center().x(), rgn[0]))
         p2 = self.vb.mapFromViewToItem(self, Point(self.vb.viewRect().center().x(), rgn[1]))
         gradRect = self.gradient.mapRectToParent(self.gradient.gradRect.rect())
@@ -152,6 +157,16 @@ class HistogramLUTItem(GraphicsWidget):
         
     def viewRangeChanged(self):
         self.update()
+
+    def viewLogChanged(self):
+        x = self.vb.xLog()
+        y = self.vb.yLog()
+        self.plot.setLogMode(x,y)
+        self.region.setLogMode(x,y)
+        self.axis.setLogMode(y)
+        are = self.vb.autoRangeEnabled()
+        self.vb.enableAutoRange()
+        self.vb.enableAutoRange(x=are[0],y=are[1])
     
     def gradientChanged(self):
         if self.imageItem() is not None:
@@ -191,19 +206,10 @@ class HistogramLUTItem(GraphicsWidget):
         self.update()
 
     def imageChanged(self, autoLevel=False, autoRange=False):
-        profiler = debug.Profiler()
-        h = self.imageItem().getHistogram()
-        profiler('get histogram')
-        if h[0] is None:
-            return
-        self.plot.setData(*h)
-        profiler('set plot')
-        if autoLevel:
-            mn = h[0][0]
-            mx = h[0][-1]
-            self.region.setRegion([mn, mx])
-            profiler('set region')
-            
+        self.updatePlot()
+        if autoLevel or self.autoLevelsEnabled():
+            self.updateAutoLevels()
+
     def getLevels(self):
         """Return the min and max levels.
         """
@@ -213,3 +219,66 @@ class HistogramLUTItem(GraphicsWidget):
         """Set the min and max levels.
         """
         self.region.setRegion([mn, mx])
+        self.gradient.setAutoLevels(False)
+
+    def autoLevelsChanged(self):
+        self.updateAutoLevels()
+        self.sigAutoLevelsChanged.emit(self)
+
+    def autoLevelsEnabled(self):
+        return self.gradient.autoLevelsEnabled()
+
+    def setAutoLevels(self, value):
+        self.gradient.setAutoLevels(value)
+        if value:
+            self.updateAutoLevels()
+
+    def updatePlot(self):
+        if self.imageItem() is None:
+            return
+        profiler = debug.Profiler()
+        h = self.imageItem().getHistogram(log=self.logModeEnabled())
+        profiler('get histogram')
+        if h[0] is None:
+            return
+        self.plot.setData(h[0], h[1])
+        profiler('set plot')
+
+    def quickMinMax(self, data):
+        """
+        Estimate the min/max values of *data* by subsampling.
+        """
+        while data.size > 1e6:
+            ax = np.argmax(data.shape)
+            sl = [slice(None)] * data.ndim
+            sl[ax] = slice(None, None, 2)
+            data = data[sl]
+        if self.logModeEnabled():
+            data = data[data > 0]
+        return np.nanmin(data), np.nanmax(data)
+
+    def autoLevels(self):
+        self.setLevels(*self.quickMinMax(self.imageItem().image))
+
+    def autoRange(self):
+        self.vb.autoRange()
+
+    def updateAutoLevels(self):
+        image = self.imageItem().image
+        if image is None:
+            return
+        profiler = debug.Profiler()
+        self.region.setRegion(self.quickMinMax(image))
+        profiler('set region')
+
+    def logModeChanged(self):
+        self.imageItem().setLog(self.gradient.logModeEnabled())
+        self.sigLogModeChanged.emit(self)
+
+    def logModeEnabled(self):
+        return self.gradient.logModeEnabled()
+
+    def setLogMode(self, value):
+        self.imageItem().setLog(value)
+        self.gradient.setLogMode(value)
+        self.updatePlot()
