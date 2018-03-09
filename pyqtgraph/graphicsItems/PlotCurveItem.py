@@ -154,7 +154,7 @@ class PlotCurveItem(GraphicsObject):
             d = d[mask]
             #d2 = d2[mask]
 
-        if len(d) == 0:
+        if len(d) == 0 or not any(np.isfinite(d)):
             return (None, None)
 
         ## Get min/max (or percentiles) of the requested data range
@@ -664,3 +664,4 @@ class ROIPlotItem(PlotCurveItem):
     def roiChangedEvent(self):
         d = self.getRoiData()
         self.updateData(d, self.xVals)
+
