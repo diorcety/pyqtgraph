@@ -121,7 +121,7 @@ class PlotCurveItem(GraphicsObject):
             d = d[mask]
             #d2 = d2[mask]
             
-        if len(d) == 0:
+        if len(d) == 0 or not any(np.isfinite(d)):
             return (None, None)
 
         ## Get min/max (or percentiles) of the requested data range
@@ -173,7 +173,7 @@ class PlotCurveItem(GraphicsObject):
         if self._boundingRect is None:
             (xmn, xmx) = self.dataBounds(ax=0)
             (ymn, ymx) = self.dataBounds(ax=1)
-            if xmn is None:
+            if xmn is None or ymn is None:
                 return QtCore.QRectF()
             
             px = py = 0.0
@@ -603,4 +603,5 @@ class ROIPlotItem(PlotCurveItem):
     def roiChangedEvent(self):
         d = self.getRoiData()
         self.updateData(d, self.xVals)
+
 
