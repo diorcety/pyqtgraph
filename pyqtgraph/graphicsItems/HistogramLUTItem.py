@@ -240,6 +240,7 @@ class HistogramLUTItem(GraphicsWidget):
         h = self.imageItem().getHistogram(log=self.logModeEnabled())
         profiler('get histogram')
         if h[0] is None:
+            self.plot.clear()
             return
         self.plot.setData(h[0], h[1])
         profiler('set plot')
