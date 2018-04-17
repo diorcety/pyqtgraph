@@ -63,8 +63,7 @@ sys.path.insert(0, os.path.join(path, 'tools'))
 import setupHelpers as helpers
 
 ## generate list of all sub-packages
-allPackages = (helpers.listAllPackages(pkgroot='pyqtgraph') + 
-               ['pyqtgraph.'+x for x in helpers.listAllPackages(pkgroot='examples')])
+allPackages = helpers.listAllPackages(pkgroot='pyqtgraph')
 
 ## Decide what version string to use in the build
 version, forcedVersion, gitVersion, initVersion = helpers.getVersionStrings(pkg='pyqtgraph')
@@ -134,8 +133,6 @@ setup(
               'mergetest': helpers.MergeTestCommand,
               'style': helpers.StyleCommand},
     packages=allPackages,
-    package_dir={'pyqtgraph.examples': 'examples'},  ## install examples along with the rest of the source
-    package_data={'pyqtgraph.examples': ['optics/*.gz', 'relativity/presets/*.cfg']},
     install_requires = [
         'numpy>=1.8.0',
         ],
