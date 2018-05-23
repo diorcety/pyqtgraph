@@ -198,6 +198,7 @@ class ImageItem(GraphicsObject):
         self.prepareGeometryChange()
         self.informViewBoundsChanged()
         self.update()
+        self.sigImageChanged.emit()
 
     def setImage(self, image=None, autoLevels=None, **kargs):
         """
