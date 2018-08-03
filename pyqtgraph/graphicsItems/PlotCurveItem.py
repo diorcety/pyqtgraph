@@ -116,7 +116,7 @@ class PlotCurveItem(GraphicsObject):
         self.opts['compositionMode'] = mode
         self.update()
 
-    def getData(self):
+    def getData(self, display=True):
         return self.xData, self.yData
 
     def dataBounds(self, ax, frac=1.0, orthoRange=None):
