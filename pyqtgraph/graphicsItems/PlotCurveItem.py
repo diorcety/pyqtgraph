@@ -444,7 +444,7 @@ class PlotCurveItem(GraphicsObject):
             if x is None or len(x) == 0 or y is None or len(y) == 0:
                 self.path = QtGui.QPainterPath()
             else:
-                self.path = self.generatePath(*self.getData())
+                self.path = self.generatePath(x, y)
             self.fillPath = None
             self._mouseShape = None
 
@@ -460,8 +460,6 @@ class PlotCurveItem(GraphicsObject):
             self.paintGL(p, opt, widget)
             return
 
-        x = None
-        y = None
         path = self.getPath()
         profiler('generate path')
 
@@ -478,18 +476,19 @@ class PlotCurveItem(GraphicsObject):
 
         if self.opts['brush'] is not None and self.opts['fillLevel'] is not None:
             if self.fillPath is None:
-                if x is None:
-                    x,y = self.getData()
                 p2 = QtGui.QPainterPath(self.path)
                 if self.opts['fillLevel'] != 'enclosed':
-                    if np.abs(y[0]-y[-1]) > np.abs(x[0]-x[-1]):
-                        p2.lineTo(self.opts['fillLevel'], y[-1])
-                        p2.lineTo(self.opts['fillLevel'], y[0])
-                        p2.lineTo(x[0], y[0])
-                    else:
-                        p2.lineTo(x[-1], self.opts['fillLevel'])
-                        p2.lineTo(x[0], self.opts['fillLevel'])
-                        p2.lineTo(x[0], y[0])
+                    if p2.elementCount() > 0:
+                        first_p = p2.elementAt(0)
+                        last_p = p2.elementAt(p2.elementCount() - 1)
+                        x, y = self.getData()
+                        if np.all(np.diff(x) >= 0):
+                            p2.lineTo(last_p.x, self.opts['fillLevel'])
+                            p2.lineTo(first_p.x, self.opts['fillLevel'])
+                        else:
+                            p2.lineTo(self.opts['fillLevel'], last_p.y)
+                            p2.lineTo(self.opts['fillLevel'], first_p.y)
+                        p2.lineTo(p2.elementAt(0).x, p2.elementAt(0).y)
                 p2.closeSubpath()
                 self.fillPath = p2
 
