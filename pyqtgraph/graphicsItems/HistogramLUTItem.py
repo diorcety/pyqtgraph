@@ -351,7 +351,7 @@ class HistogramLUTItem(GraphicsWidget):
             self.plots[0].setVisible(True)
             # plot one histogram for all image data
             profiler = debug.Profiler()
-            h = self.imageItem().getHistogram()
+            h = self.imageItem().getHistogram(log=self.logModeEnabled())
             profiler('get histogram')
             if h[0] is None:
                 self.clearPlots()
@@ -362,7 +362,7 @@ class HistogramLUTItem(GraphicsWidget):
         else:
             # plot one histogram for each channel
             self.plots[0].setVisible(False)
-            ch = self.imageItem().getHistogram(perChannel=True)
+            ch = self.imageItem().getHistogram(perChannel=True, log=self.logModeEnabled())
             if ch[0] is None:
                 self.clearPlots()
                 return
