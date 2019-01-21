@@ -495,8 +495,8 @@ class ImageItem(GraphicsObject):
             stepData = stepData[stepData > 0]
         
         if bins == 'auto':
-            mn = stepData.min()
-            mx = stepData.max()
+            mn = np.nanmin(stepData)
+            mx = np.nanmax(stepData)
             if stepData.dtype.kind in "ui" and not log:
                 # For integer data, we select the bins carefully to avoid aliasing
                 step = np.ceil((mx-mn) / float(targetHistogramSize))
