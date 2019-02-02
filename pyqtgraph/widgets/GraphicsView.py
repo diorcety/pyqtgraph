@@ -364,7 +364,7 @@ class GraphicsView(QtGui.QGraphicsView):
     def mouseMoveEvent(self, ev):
         if self.lastMousePos is None:
             self.lastMousePos = Point(ev.pos())
-        delta = Point(ev.pos() - self.lastMousePos)
+        delta = Point(ev.pos() - QtCore.QPoint(*self.lastMousePos))
         self.lastMousePos = Point(ev.pos())
 
         QtGui.QGraphicsView.mouseMoveEvent(self, ev)
